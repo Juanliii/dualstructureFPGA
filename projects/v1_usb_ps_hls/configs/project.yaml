@@ -1,0 +1,20 @@
+project:
+  name: v1_usb_ps_hls
+  version: V1
+  toolchain: "Vivado/Vitis/Vitis HLS 2021.2"
+board:
+  name: AXU5EVB-E
+  part: xczu5ev-sfvc784-2-i
+input:
+  source: usb
+  width: 1224
+  height: 1024
+  pixel_format: Mono8
+  fps: 30
+pipeline:
+  capture_owner: ps_linux
+  hls_ip: ../../common/hls/ip_repo/stereo_pipeline/stereo_pipeline.zip
+  output:
+    depth: uint16_mm
+    pointcloud: q16_16_xyz
+

@@ -1,0 +1,21 @@
+project:
+  name: v3_gige_pl_hls
+  version: V3
+  toolchain: "Vivado/Vitis/Vitis HLS 2021.2"
+board:
+  name: AXU5EVB-E
+  part: xczu5ev-sfvc784-2-i
+input:
+  source: dual_gige_pl
+  camera: MV-CS013-60GN
+  width: 1224
+  height: 1024
+  pixel_format: Mono8
+  fps: 30
+pipeline:
+  capture_owner: pl_rtl
+  hls_ip: ../../common/hls/ip_repo/stereo_pipeline/stereo_pipeline.zip
+  output:
+    depth: uint16_mm
+    pointcloud: q16_16_xyz
+

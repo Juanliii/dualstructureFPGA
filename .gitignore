@@ -1,0 +1,40 @@
+# Xilinx generated outputs
+common/hls/build/
+common/hls/ip_repo/
+**/.Xil/
+**/.cache/
+**/.runs/
+**/.srcs/
+**/.sim/
+**/build/
+**/workspace/
+**/Debug/
+**/Release/
+**/xsa/
+**/*.jou
+**/*.log
+**/*.str
+**/*.xpr
+**/*.bit
+**/*.ltx
+**/*.xsa
+**/*.hdf
+**/*.dcp
+**/*.rpt
+**/*.wdb
+**/*.wcfg
+
+# Vitis/Vivado local metadata
+**/.metadata/
+**/.settings/
+**/RemoteSystemsTempFiles/
+**/webtalk*.zip
+**/webtalk*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
