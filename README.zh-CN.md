@@ -19,6 +19,67 @@ Mono8
 left + right 双目输入
 ```
 
+## 三个工作流 Scope
+
+### 工作流一 Scope：HLS 算法与 PS-DMA 验证流
+
+对应工程：`projects/v1_usb_ps_hls`
+
+包含内容：
+
+- USB 双目/红外参考输入，或从文件/缓存模拟 left/right Mono8 输入；
+- PS Linux 侧图像采集、缓存管理和 DMA buffer 准备；
+- PS 通过 AXI DMA/AXI4-Stream 将左右图像送入 PL；
+- PL 中运行共享 `stereo_pipeline` HLS IP；
+- HLS IP 输出 `depth stream` 和 `pointcloud stream`；
+- PS 读取结果、保存结果，并与 CPU 软件实现做延迟和输出一致性对比。
+
+不包含内容：
+
+- 不要求接入真实双 GigE 工业相机；
+- 不要求 PL 解析以太网/GVSP 数据包；
+- 不要求完成最终真实双目匹配算法，第一阶段可使用占位 depth/pointcloud。
+
+### 工作流二 Scope：真实双 GigE 相机 PS 采集流
+
+对应工程：`projects/v2_gige_ps_hls`
+
+包含内容：
+
+- 两台 MV-CS013-60GN 千兆网口红外相机；
+- PS Linux 侧 GigE Vision/GenICam 相机发现、配置和采集；
+- 左右帧配对、帧号/时间戳检查、丢帧统计；
+- PL 产生左右相机硬触发、曝光窗口、激光/散斑投影器使能时序；
+- PS 通过 AXI-Lite 配置 PL 触发参数并读取触发状态；
+- PS 将真实左右图像通过 DMA 送入共享 HLS `stereo_pipeline`；
+- 输出深度图和点云，并评估真实相机链路下的同步、延迟和稳定性。
+
+不包含内容：
+
+- 不要求 PL 直接接收 GigE 数据包；
+- 不要求 PL 解析 IPv4/UDP/GVSP；
+- 不改变 HLS 算法 IP 的主体结构，优先复用工作流一的 `stereo_pipeline`。
+
+### 工作流三 Scope：PL 纯采集低延迟流
+
+对应工程：`projects/v3_gige_pl_hls`
+
+包含内容：
+
+- 两台 MV-CS013-60GN 千兆网口红外相机；
+- PL RGMII / Ethernet MAC 接收链路；
+- PL 解析 Ethernet、IPv4、UDP、GVSP，并完成 packet-to-pixel stream；
+- PL 检查 packet id、frame id、丢包、乱序和帧完整性；
+- PL 统一产生左右相机触发、曝光窗口、激光/散斑投影器时序；
+- PL 将重组后的 left/right Mono8 像素流直接送入共享 HLS `stereo_pipeline`；
+- PS 仅负责参数配置、状态监控、错误计数读取和结果管理。
+
+不包含内容：
+
+- 不以 PS Linux 网络采集作为主数据路径；
+- 不把双目匹配、深度转换、点云生成改写成大规模手写 RTL；
+- 不跳过 V1/V2 的验证结果，V3 应在已有 HLS IP 和同步策略稳定后推进。
+
 ## 硬件与工具链假设
 
 - 开发板：AXU5EVB-E。
@@ -88,6 +149,43 @@ vitis_hls -f scripts/export_all_ips.tcl
 ```text
 CSim done with 0 errors
 生成 IP: common/hls/ip_repo/stereo_pipeline/stereo_pipeline.zip
+```
+
+## 三条工作流
+
+本工程不是三个互不相关的项目，而是三条逐步递进的工作流：先验证算法和 DMA 通路，再接入真实双 GigE 相机系统，最后把采集和同步时序尽量下沉到 PL，形成低延迟方案。
+
+| 工作流 | 对应工程 | 核心目标 | 主要完成的工作 |
+| --- | --- | --- | --- |
+| 工作流一：HLS 算法与 PS-DMA 验证流 | `v1_usb_ps_hls` | 用 USB 输入快速打通 PS 采集、DMA、HLS IP、结果回读 | 建立共享 `stereo_pipeline` HLS IP；验证 AXI4-Stream 输入输出；在 PS Linux 中准备 USB/V4L2 采集入口；通过 DMA 把 left/right 图像送入 PL；读取 depth 和 pointcloud 输出 |
+| 工作流二：真实双 GigE 相机 PS 采集流 | `v2_gige_ps_hls` | 接入两台 MV-CS013-60GN，并验证真实相机、硬触发、散斑/激光同步和 HLS 计算 | 在 PS Linux 中完成 GigE Vision/GenICam 相机配置和采集；PL 产生左右相机触发和激光/投影器使能；PS 配置触发参数并做左右帧配对；继续复用 V1 的 HLS 深度计算 IP |
+| 工作流三：PL 纯采集低延迟流 | `v3_gige_pl_hls` | 将 GigE 接收、GVSP 解析、帧重组、同步触发尽量放入 PL，PS 只负责配置和监控 | 在 PL 中实现 RGMII/MAC/IPv4/UDP/GVSP 解析；将相机数据直接转为像素 AXI4-Stream；PL 统一管理相机触发、曝光窗口、激光/投影器时序和 frame_id；HLS IP 直接消费 PL 图像流并输出深度图和点云 |
+
+三条工作流的关系：
+
+```text
+工作流一：证明 HLS IP 和 PS-DMA 数据通路可用
+    -> 工作流二：换成真实双 GigE 相机，并加入 FPGA 同步触发
+        -> 工作流三：把采集链路也搬到 PL，降低延迟和 PS 负载
+```
+
+每条工作流都复用同一个核心目标：让 `stereo_pipeline` 最终输出 `depth stream` 和 `pointcloud stream`。区别在于输入数据从哪里来、采集由谁负责、同步时序由谁控制。
+
+### 每条工作流可测评内容
+
+| 工作流 | 可测评对象 | 典型测评指标 | 主要价值 |
+| --- | --- | --- | --- |
+| 工作流一：HLS 算法与 PS-DMA 验证流 | FPGA 与 CPU 在红外图像转深度图、点云生成上的性能差异 | 单帧处理延迟、端到端延迟、吞吐帧率、CPU 占用、PL 资源占用、DMA 搬运开销、depth/pointcloud 输出一致性 | 证明把深度计算搬到 FPGA 是否值得；量化 CPU 软件算法和 HLS/PL 加速之间的延迟差距 |
+| 工作流二：真实双 GigE 相机 PS 采集流 | 真实双相机系统的采集稳定性、同步效果和 FPGA 触发控制效果 | 左右帧时间差、触发抖动、丢帧率、GigE 采集延迟、PS 网络负载、DMA 排队延迟、激光/散斑开启时序与曝光窗口匹配程度 | 验证真实硬件链路是否能稳定给 HLS IP 喂数据；评估 FPGA 触发相比 Linux 软件触发的同步优势 |
+| 工作流三：PL 纯采集低延迟流 | PS 采集方案与 PL 采集方案的低延迟差异，以及完整 PL 数据链路可靠性 | 以太网包到像素流延迟、GVSP 解析延迟、帧重组延迟、端到端深度输出延迟、丢包/乱序检测能力、PS 占用下降幅度、系统最大稳定帧率 | 评估最终低延迟架构是否优于 PS 采集架构；验证 PL 直采、PL 同步和 HLS 深度计算能否组成完整实时链路 |
+
+建议在三个工作流中统一记录以下基础数据，便于横向比较：
+
+```text
+输入规格：1224 x 1024 Mono8 x 2
+目标帧率：30 fps
+输出：uint16 depth + Q16.16 XYZ pointcloud
+统计项：平均延迟、P95/P99 延迟、最大延迟、丢帧率、CPU 占用、PL 资源、功耗
 ```
 
 ## 三个版本的开发重点
